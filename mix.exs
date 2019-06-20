@@ -11,14 +11,14 @@ defmodule ExAws.Mixfile do
       elixirc_paths: elixirc_paths(Mix.env()),
       description: "Generic AWS client",
       name: "ExAws",
-      source_url: "https://github.com/ex-aws/ex_aws",
+      source_url: "https://github.com/cmgriffing/ex_aws",
       package: package(),
       dialyzer: [flags: "--fullpath"],
       deps: deps(),
       docs: [
         main: "ExAws",
         source_ref: "v#{@version}",
-        source_url: "https://github.com/ex-aws/ex_aws"
+        source_url: "https://github.com/cmgriffing/ex_aws"
       ]
     ]
   end

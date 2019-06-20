@@ -16,4 +16,5 @@ defmodule ExAws.Auth.Signatures do
     |> hmac_sha256(service)
     |> hmac_sha256("aws4_request")
   end
+
 end

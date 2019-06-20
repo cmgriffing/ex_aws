@@ -111,6 +111,117 @@ defmodule ExAws.Auth do
     end
   end
 
+  # Get a Presigned POST request
+  def presigned_post(
+        url,
+        service,
+        datetime,
+        config,
+        expires,
+        query_params \\ [],
+        params \\ %{ key: "", bucket: "", Fields: [], Conditions: [] },
+        body \\ nil
+      ) do
+
+    with {:ok, config} <- validate_config(config) do
+      service = service_name(service)
+      signed_headers = presigned_url_headers(url, query_params)
+
+      org_query_params = query_params |> Enum.map(fn {k, v} -> {to_string(k), v} end)
+
+      amz_query_params =
+        build_amz_query_params(service, datetime, config, expires, signed_headers)
+
+      [org_query, amz_query] =
+        [org_query_params, amz_query_params] |> Enum.map(&canonical_query_params/1)
+
+      query_to_sign = (org_query_params ++ amz_query_params) |> canonical_query_params
+
+      query_for_url =
+        if Enum.any?(org_query_params), do: org_query <> "&" <> amz_query, else: amz_query
+
+      uri = URI.parse(url)
+
+      path =
+        if uri.query do
+          uri.path <> "?" <> uri.query
+        else
+          uri.path
+        end
+
+      path = uri_encode(path)
+
+      datetime = :calendar.universal_time
+
+      {:ok, %{
+        url: "#{uri.scheme}://#{params[:bucket]}.#{uri.authority}",
+        fields: prepare_post_fields(
+          config,
+          params[:bucket],
+          params[:Fields],
+          params[:Conditions],
+          expires,
+          datetime,
+          params[:key],
+          service
+        )
+      }}
+    end
+  end
+
+  defp prepare_post_fields(
+    config,
+    bucket,
+    fields,
+    conditions,
+    expires_in,
+    datetime,
+    path,
+    service
+  ) do
+
+    credential = Credentials.generate_credential_v4(:s3, config, datetime)
+
+    newFields = %{
+      "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+      "X-Amz-Credential": credential,
+      "X-Amz-Date": amz_date(datetime),
+      bucket: bucket,
+      key: path
+    }
+
+    newFieldsList = [
+      %{"X-Amz-Algorithm": "AWS4-HMAC-SHA256"},
+      %{"X-Amz-Credential": credential},
+      %{"X-Amz-Date": amz_date(datetime)},
+      %{bucket: bucket},
+      %{key: path}
+    ]
+
+    newConditions = conditions ++ newFieldsList
+
+    expiration = DateTime.utc_now()
+    |> DateTime.add(60, :seconds)
+    |> DateTime.to_iso8601()
+
+    policy = Base.encode64(Jason.encode!(%{
+      expiration: expiration,
+      conditions: newConditions
+    }))
+
+    # maybe newConditions should be newFields here?
+    Map.merge(newFields, %{
+      policy: policy,
+      "X-Amz-Signature": signature_custom(
+        service,
+        datetime,
+        config,
+        policy
+      )
+    })
+
+  end
+
   defp handle_temp_credentials(headers, %{security_token: token}) do
     [{"X-Amz-Security-Token", token} | headers]
   end
@@ -144,6 +255,10 @@ defmodule ExAws.Auth do
   defp signature(http_method, path, query, headers, body, service, datetime, config) do
     request = build_canonical_request(http_method, path, query, headers, body)
     string_to_sign = string_to_sign(request, service, datetime, config)
+    Signatures.generate_signature_v4(service, config, datetime, string_to_sign)
+  end
+
+  defp signature_custom(service, datetime, config, string_to_sign) do
     Signatures.generate_signature_v4(service, config, datetime, string_to_sign)
   end
 
